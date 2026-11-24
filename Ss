@@ -2,7 +2,7 @@
 
 (function () {
     if (app.documents.length === 0) {
-        alert("Open the Interior Pages file (natural order: Jan 1, Jan 2, ...) first.");
+        alert("Open the Interior Pages file (natural order) first.");
         return;
     }
     var doc = app.activeDocument;
@@ -14,24 +14,32 @@
         "(To/From, Copyright, Message, Dedications, Welcome = 5)", "5"), 10);
     if (isNaN(k) || k < 0 || k >= total) return;
 
-    var m = total - k;
-    if (m % 2) {
-        alert("The calendar part has " + m + " pages (odd number).\n" +
-              "Both halves must be equal, so there is one extra or missing page.\n" +
-              "Check the file and run again.");
+    var s2 = parseInt(prompt(
+        "Which page number is the FIRST page read AFTER turning the tent?\n" +
+        "(usually the July opener, right after the Flip page)", "195"), 10);
+    if (isNaN(s2) || s2 <= k + 1 || s2 > total) { alert("Invalid page number."); return; }
+
+    var f = s2 - 1 - k;          // first-half pages (Jan opener ... Flip)
+    var r = total - (s2 - 1);    // second-half pages (July opener ... Dec 31)
+    var S = k + f;               // number of sheets
+    if (r > S) {
+        alert("The second half (" + r + " pages) is longer than the number of sheets (" + S + ").\nCheck the page numbers and run again.");
         return;
     }
-    var half = m / 2;
+
+    var pages = doc.pages.everyItem().getElements();
+    var lastBackSheet = S - r + 1;   // sheet that carries the last page (Dec 31) on its back
+    var lastBackFront = lastBackSheet <= k ? pages[lastBackSheet - 1] : pages[k + (lastBackSheet - k) - 1];
 
     if (!confirm(
         "Plan:\n" +
-        "- " + k + " intro pages, each with a blank back\n" +
-        "- First half: " + half + " pages (January opener ... July opener)\n" +
-        "- Second half: " + half + " pages (July 1 ... December 31)\n" +
-        "- Result: " + (2 * k + m) + " pages\n\n" +
+        "- Intro: " + k + " pages (fronts)\n" +
+        "- First half: pages " + (k + 1) + "–" + (s2 - 1) + " (" + f + " pages)\n" +
+        "- Second half: pages " + s2 + "–" + total + " (" + r + " pages), on the backs, last sheet first\n" +
+        "- The last page (Dec 31) goes on the back of original page " + lastBackFront.name + "\n" +
+        "- Result: " + (2 * S) + " pages\n\n" +
         "A NEW file will be saved. Your original stays untouched.\nContinue?")) return;
 
-    // Save as a new file first (original is not changed)
     var base = doc.fullName.fsName.replace(/\.indd$/i, "");
     var outFile = new File(base + "_PRINT_ORDER.indd");
     doc.save(outFile);
@@ -39,21 +47,16 @@
     doc.documentPreferences.facingPages = false;
     try { doc.documentPreferences.allowPageShuffle = true; } catch (e) {}
 
-    // Snapshot of the pages in natural order
-    var pages = doc.pages.everyItem().getElements();
-
-    // Build the print order
+    // Build the order: each sheet = front, back
     var order = [];
-    for (var j = 0; j < k; j++) {
-        order.push(pages[j]);   // intro page (front)
-        order.push(null);       // blank back
-    }
-    for (var i = 0; i < half; i++) {
-        order.push(pages[k + i]);           // first half day (front)
-        order.push(pages[k + m - 1 - i]);   // matching second half day (back)
+    for (var idx = 1; idx <= S; idx++) {
+        var front = idx <= k ? pages[idx - 1] : pages[k + (idx - k) - 1];
+        var j = S - idx + 1;   // second-half position counted from the last sheet
+        var back = j <= r ? pages[(s2 - 1) + (j - 1)] : null;
+        order.push(front);
+        order.push(back);
     }
 
-    // Rearrange
     for (var n = 0; n < order.length; n++) {
         if (order[n]) {
             order[n].move(LocationOptions.AT_END);
@@ -68,10 +71,9 @@
     alert(
         "Done! " + last + " pages.\nSaved as: " + outFile.name + "\n\n" +
         "Please check:\n" +
-        "- page " + (2 * k + 1) + " = January opener\n" +
-        "- page " + (2 * k + 2) + " = December 31\n" +
-        "- page " + (2 * k + 3) + " = January 1\n" +
-        "- page " + (2 * k + 4) + " = December 30\n" +
-        "- page " + (last - 1) + " = July opener\n" +
-        "- page " + last + " = July 1");
+        "- page 1 = To / From\n" +
+        "- page " + (2 * lastBackSheet - 1) + " = Welcome,  page " + (2 * lastBackSheet) + " = December 31\n" +
+        "- page " + (2 * k + 1) + " = January opener,  page " + (2 * k + 2) + " = December 30\n" +
+        "- page " + (last - 3) + " = June 30,  page " + (last - 2) + " = July 1\n" +
+        "- page " + (last - 1) + " = Flip,  page " + last + " = July opener");
 })();
