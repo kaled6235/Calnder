@@ -14,58 +14,47 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
         for (var i = 0; i < Math.min(arr.length, max); i++) log("     - " + arr[i]);
         if (arr.length > max) log("     ... and " + (arr.length - max) + " more");
     }
-
-    var SPEC = [
-        { label: "Print-Ready Interior (imposed order) - PRINT", role: "print" },
-        { label: "Cover - PRINT", role: "print" },
-        { label: "Interior Pages (natural order) - PREVIEW", role: "preview" }
-    ];
-
-    var outFolder = Folder.selectDialog("Choose a folder for the final files");
-    if (!outFolder) return;
-
-    var files = [];
-    for (var s = 0; s < SPEC.length; s++) {
-        files.push(File.openDialog("Select the InDesign file for:\n" + SPEC[s].label + "\n(Cancel to skip)"));
+    function uniq(a) {
+        var o = {}, r = [];
+        for (var i = 0; i < a.length; i++) if (!o[a[i]]) { o[a[i]] = 1; r.push(a[i]); }
+        return r;
     }
 
-    var summary = [], chinaFound = [];
+    // ---- Pick ONE file
+    var file = File.openDialog("Select the InDesign file (.indd)");
+    if (!file) return;
+    if (!/\.indd$/i.test(file.name)) { alert("Please select an InDesign (.indd) file."); return; }
+
+    var isPrint = confirm("Is this file for PRINT?\n\nYes = Print (PDF/X-1a, with bleed)\nNo = Preview only");
+    var role = isPrint ? "print" : "preview";
+    var outFolder = file.parent;
+    var base = file.name.replace(/\.indd$/i, "");
+    var result = "";
+
     app.scriptPreferences.userInteractionLevel = UserInteractionLevels.NEVER_INTERACT;
     try {
-        for (var k = 0; k < SPEC.length; k++) {
-            if (!files[k]) { log("\n===== " + SPEC[k].label + " =====\n  SKIPPED"); continue; }
-            try {
-                summary.push(processFile(files[k], SPEC[k]));
-            } catch (e) {
-                log("  ERROR: " + e + " (line " + e.line + ")");
-                summary.push(SPEC[k].label + ": ERROR, see report");
-            }
-        }
+        result = processFile();
+    } catch (e) {
+        log("  ERROR: " + e + " (line " + e.line + ")");
+        result = "ERROR, see report";
     } finally {
         app.scriptPreferences.userInteractionLevel = UserInteractionLevels.INTERACT_WITH_ALL;
     }
 
-    log("\n==================================================");
-    log("\"Printed in China\": " + (chinaFound.length ? "found in " + chinaFound.join(", ") : "NOT FOUND in any file - please add it"));
-
-    var rf = new File(outFolder.fsName + "/Preflight_Report.txt");
+    var rf = new File(outFolder.fsName + "/" + base + "_Report.txt");
     rf.encoding = "UTF-8";
     rf.open("w");
     rf.write("PRINTNINJA PREFLIGHT REPORT\n" + new Date() + "\n" + REPORT.join("\n"));
     rf.close();
-    alert("Finished!\n\n" + summary.join("\n") +
-          "\n\nPrinted in China: " + (chinaFound.length ? "found" : "NOT FOUND") +
-          "\n\nFull report: Preflight_Report.txt");
+    alert("Finished!\n\n" + file.name + ": " + result + "\n\nReport: " + rf.name);
     rf.execute();
 
     // ==========================================================
-    function processFile(file, spec) {
+    function processFile() {
         var doc = app.open(file, true);
-        var base = file.name.replace(/\.indd$/i, "");
         var attention = 0;
         log("\n==================================================");
-        log(spec.label);
-        log("File: " + file.name);
+        log("File: " + file.name + "  (" + (isPrint ? "PRINT" : "PREVIEW") + ")");
         log("==================================================");
 
         var vp = doc.viewPreferences;
@@ -153,7 +142,7 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
         for (i = 0; i < 4; i++) if (bl[i] < NEED - 0.01) bleedOK = false;
         if (bleedOK) {
             log("[Bleed] OK (0.125 in or more)");
-        } else if (spec.role == "print" && FIX_BLEED) {
+        } else if (isPrint && FIX_BLEED) {
             dp.documentBleedUniformSize = true;
             dp.documentBleedTopOffset = NEED;
             dp.documentBleedBottomOffset = NEED;
@@ -161,8 +150,8 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
             dp.documentBleedOutsideOrRightOffset = NEED;
             log("[Bleed] was under 0.125 in -> FIXED to 0.125 in (artwork must still extend into it)");
         } else {
-            log("[Bleed] under 0.125 in" + (spec.role == "print" ? "  <-- WARNING" : " (preview, ignored)"));
-            if (spec.role == "print") attention++;
+            log("[Bleed] under 0.125 in" + (isPrint ? "  <-- WARNING" : " (preview, ignored)"));
+            if (isPrint) attention++;
         }
 
         // ---- Artwork reaching bleed + text safe area (check)
@@ -192,7 +181,7 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
         }
         list("CHECK: artwork stops exactly at trim (no bleed)", uniq(noBleed));
         list("CHECK: text frames closer than 1/8 in to trim", uniq(unsafe));
-        if (spec.role == "print") attention += (noBleed.length ? 1 : 0) + (unsafe.length ? 1 : 0);
+        if (isPrint) attention += (noBleed.length ? 1 : 0) + (unsafe.length ? 1 : 0);
 
         // ---- Images (check)
         var low = [], mid = [], rgb = 0, gr = doc.allGraphics;
@@ -224,50 +213,42 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
         if (hits.length) {
             var where2 = "?"; try { where2 = hits[0].parentTextFrames[0].parentPage.name; } catch (e) {}
             log("[Printed in China] found (page " + where2 + ")");
-            chinaFound.push(base);
         } else {
-            log("[Printed in China] not found in this file");
+            log("[Printed in China] NOT found in this file");
         }
 
         // ---- Save fixed copy + export
-        var tag = spec.role == "print" ? "_PRINT" : "_PREVIEW";
+        var tag = isPrint ? "_PRINT" : "_PREVIEW";
         doc.save(new File(outFolder.fsName + "/" + base + "_FIXED.indd"));
-        setPdfPrefs(spec.role);
+        setPdfPrefs();
         var pdf = new File(outFolder.fsName + "/" + base + tag + ".pdf");
         doc.exportFile(ExportFormat.PDF_TYPE, pdf, false);
         log("[Export] " + pdf.name + " (" + pc + " pages)");
         doc.close(SaveOptions.NO);
 
-        return spec.label + ": " + (attention ? attention + " item(s) need attention" : "OK");
+        return attention ? attention + " item(s) need attention" : "OK";
     }
 
-    function uniq(a) {
-        var o = {}, r = [];
-        for (var i = 0; i < a.length; i++) if (!o[a[i]]) { o[a[i]] = 1; r.push(a[i]); }
-        return r;
-    }
-
-    function setPdfPrefs(role) {
+    function setPdfPrefs() {
         var p = app.pdfExportPreferences;
         function set(k, v) { try { p[k] = v; } catch (e) { log("  note: could not set PDF option " + k); } }
-        var print = role == "print";
-        set("standardsCompliance", print ? PDFXStandards.PDFX1A2001_STANDARD : PDFXStandards.NONE);
-        set("acrobatCompatibility", print ? AcrobatCompatibility.ACROBAT_4 : AcrobatCompatibility.ACROBAT_7);
+        set("standardsCompliance", isPrint ? PDFXStandards.PDFX1A2001_STANDARD : PDFXStandards.NONE);
+        set("acrobatCompatibility", isPrint ? AcrobatCompatibility.ACROBAT_4 : AcrobatCompatibility.ACROBAT_7);
         set("pageRange", PageRange.ALL_PAGES);
         set("exportReaderSpreads", false);
         set("pdfColorSpace", PDFColorSpace.REPURPOSE_CMYK);
         set("pdfDestinationProfile", PDFProfileSelector.USE_DOCUMENT);
-        var dpi = print ? 300 : 150, thr = print ? 450 : 225;
+        var dpi = isPrint ? 300 : 150, thr = isPrint ? 450 : 225;
         set("colorBitmapSampling", Sampling.BICUBIC_DOWNSAMPLE);
         set("colorBitmapSamplingDPI", dpi);
         set("thresholdToCompressColor", thr);
         set("colorBitmapCompression", BitmapCompression.AUTO_COMPRESSION);
-        set("colorBitmapQuality", print ? CompressionQuality.MAXIMUM : CompressionQuality.HIGH);
+        set("colorBitmapQuality", isPrint ? CompressionQuality.MAXIMUM : CompressionQuality.HIGH);
         set("grayscaleBitmapSampling", Sampling.BICUBIC_DOWNSAMPLE);
         set("grayscaleBitmapSamplingDPI", dpi);
         set("thresholdToCompressGray", thr);
         set("grayscaleBitmapCompression", BitmapCompression.AUTO_COMPRESSION);
-        set("grayscaleBitmapQuality", print ? CompressionQuality.MAXIMUM : CompressionQuality.HIGH);
+        set("grayscaleBitmapQuality", isPrint ? CompressionQuality.MAXIMUM : CompressionQuality.HIGH);
         set("monochromeBitmapSampling", Sampling.BICUBIC_DOWNSAMPLE);
         set("monochromeBitmapSamplingDPI", 1200);
         set("thresholdToCompressMonochrome", 1800);
@@ -278,15 +259,15 @@ var FIX_BLEED = true;   // set to false if you don't want the bleed changed
         set("registrationMarks", false);
         set("colorBars", false);
         set("pageInformationMarks", false);
-        set("useDocumentBleedWithPDF", print);
-        if (!print) { set("bleedTop", 0); set("bleedBottom", 0); set("bleedInside", 0); set("bleedOutside", 0); }
+        set("useDocumentBleedWithPDF", isPrint);
+        if (!isPrint) { set("bleedTop", 0); set("bleedBottom", 0); set("bleedInside", 0); set("bleedOutside", 0); }
         set("includeSlugWithPDF", false);
         set("subsetFontsBelow", 100);
         set("includeBookmarks", false);
         set("includeHyperlinks", false);
         set("exportLayers", false);
         set("generateThumbnails", false);
-        set("optimizePDF", !print);
+        set("optimizePDF", !isPrint);
         set("viewPDF", false);
     }
 })();
