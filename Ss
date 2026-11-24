@@ -2,78 +2,46 @@
 
 (function () {
     if (app.documents.length === 0) {
-        alert("Open the Interior Pages file (natural order) first.");
+        alert("Open the final print file first.");
         return;
     }
     var doc = app.activeDocument;
+
+    var baseFolder;
+    try { baseFolder = doc.filePath; } catch (e) {
+        baseFolder = Folder.selectDialog("Choose where to create the 'pages' folder");
+        if (!baseFolder) return;
+    }
+    var out = new Folder(baseFolder.fsName + "/pages");
+    if (!out.exists) out.create();
+
     var total = doc.pages.length;
+    if (!confirm("Export " + total + " pages as images to:\n" + out.fsName + "\n\nContinue?")) return;
 
-    var k = parseInt(prompt(
-        "This file has " + total + " pages.\n\n" +
-        "How many intro pages come BEFORE the January opener?\n" +
-        "(To/From, Copyright, Message, Dedications, Welcome = 5)", "5"), 10);
-    if (isNaN(k) || k < 0 || k >= total) return;
+    var p = app.jpegExportPreferences;
+    p.jpegExportRange = ExportRangeOrAllPages.EXPORT_RANGE;
+    p.exportResolution = 96;
+    p.jpegQuality = JPEGOptionsQuality.MEDIUM;
+    p.jpegColorSpace = JpegColorSpaceEnum.RGB;
+    p.antiAlias = true;
+    p.exportingSpread = false;
+    try { p.useDocumentBleeds = false; } catch (e) {}
+    try { p.simulateOverprint = true; } catch (e) {}
 
-    var s2 = parseInt(prompt(
-        "Which page number is the FIRST page read AFTER turning the tent?\n" +
-        "(usually the July opener, right after the Flip page)", "195"), 10);
-    if (isNaN(s2) || s2 <= k + 1 || s2 > total) { alert("Invalid page number."); return; }
+    function pad(n) { var s = String(n); while (s.length < 3) s = "0" + s; return s; }
 
-    var f = s2 - 1 - k;          // first-half pages (Jan opener ... Flip)
-    var r = total - (s2 - 1);    // second-half pages (July opener ... Dec 31)
-    var S = k + f;               // number of sheets
-    if (r > S) {
-        alert("The second half (" + r + " pages) is longer than the number of sheets (" + S + ").\nCheck the page numbers and run again.");
-        return;
-    }
-
-    var pages = doc.pages.everyItem().getElements();
-    var lastBackSheet = S - r + 1;   // sheet that carries the last page (Dec 31) on its back
-    var lastBackFront = lastBackSheet <= k ? pages[lastBackSheet - 1] : pages[k + (lastBackSheet - k) - 1];
-
-    if (!confirm(
-        "Plan:\n" +
-        "- Intro: " + k + " pages (fronts)\n" +
-        "- First half: pages " + (k + 1) + "–" + (s2 - 1) + " (" + f + " pages)\n" +
-        "- Second half: pages " + s2 + "–" + total + " (" + r + " pages), on the backs, last sheet first\n" +
-        "- The last page (Dec 31) goes on the back of original page " + lastBackFront.name + "\n" +
-        "- Result: " + (2 * S) + " pages\n\n" +
-        "A NEW file will be saved. Your original stays untouched.\nContinue?")) return;
-
-    var base = doc.fullName.fsName.replace(/\.indd$/i, "");
-    var outFile = new File(base + "_PRINT_ORDER.indd");
-    doc.save(outFile);
-
-    doc.documentPreferences.facingPages = false;
-    try { doc.documentPreferences.allowPageShuffle = true; } catch (e) {}
-
-    // Build the order: each sheet = front, back
-    var order = [];
-    for (var idx = 1; idx <= S; idx++) {
-        var front = idx <= k ? pages[idx - 1] : pages[k + (idx - k) - 1];
-        var j = S - idx + 1;   // second-half position counted from the last sheet
-        var back = j <= r ? pages[(s2 - 1) + (j - 1)] : null;
-        order.push(front);
-        order.push(back);
-    }
-
-    for (var n = 0; n < order.length; n++) {
-        if (order[n]) {
-            order[n].move(LocationOptions.AT_END);
-        } else {
-            var np = doc.pages.add(LocationOptions.AT_END);
-            try { np.appliedMaster = NothingEnum.NOTHING; } catch (e) {}
+    var failed = [];
+    for (var i = 0; i < total; i++) {
+        p.pageString = "+" + (i + 1);
+        var f = new File(out.fsName + "/page-" + pad(i + 1) + ".jpg");
+        try {
+            doc.exportFile(ExportFormat.JPG, f, false);
+        } catch (e) {
+            failed.push(i + 1);
         }
     }
-    doc.save();
 
-    var last = doc.pages.length;
-    alert(
-        "Done! " + last + " pages.\nSaved as: " + outFile.name + "\n\n" +
-        "Please check:\n" +
-        "- page 1 = To / From\n" +
-        "- page " + (2 * lastBackSheet - 1) + " = Welcome,  page " + (2 * lastBackSheet) + " = December 31\n" +
-        "- page " + (2 * k + 1) + " = January opener,  page " + (2 * k + 2) + " = December 30\n" +
-        "- page " + (last - 3) + " = June 30,  page " + (last - 2) + " = July 1\n" +
-        "- page " + (last - 1) + " = Flip,  page " + last + " = July opener");
+    alert("Done!\n" + (total - failed.length) + " images saved in:\n" + out.fsName +
+          (failed.length ? "\n\nFailed pages: " + failed.join(", ") : ""));
+    out.execute();
 })();
