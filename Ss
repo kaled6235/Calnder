@@ -1,0 +1,77 @@
+#target indesign
+
+(function () {
+    if (app.documents.length === 0) {
+        alert("Open the Interior Pages file (natural order: Jan 1, Jan 2, ...) first.");
+        return;
+    }
+    var doc = app.activeDocument;
+    var total = doc.pages.length;
+
+    var k = parseInt(prompt(
+        "This file has " + total + " pages.\n\n" +
+        "How many intro pages come BEFORE the January opener?\n" +
+        "(To/From, Copyright, Message, Dedications, Welcome = 5)", "5"), 10);
+    if (isNaN(k) || k < 0 || k >= total) return;
+
+    var m = total - k;
+    if (m % 2) {
+        alert("The calendar part has " + m + " pages (odd number).\n" +
+              "Both halves must be equal, so there is one extra or missing page.\n" +
+              "Check the file and run again.");
+        return;
+    }
+    var half = m / 2;
+
+    if (!confirm(
+        "Plan:\n" +
+        "- " + k + " intro pages, each with a blank back\n" +
+        "- First half: " + half + " pages (January opener ... July opener)\n" +
+        "- Second half: " + half + " pages (July 1 ... December 31)\n" +
+        "- Result: " + (2 * k + m) + " pages\n\n" +
+        "A NEW file will be saved. Your original stays untouched.\nContinue?")) return;
+
+    // Save as a new file first (original is not changed)
+    var base = doc.fullName.fsName.replace(/\.indd$/i, "");
+    var outFile = new File(base + "_PRINT_ORDER.indd");
+    doc.save(outFile);
+
+    doc.documentPreferences.facingPages = false;
+    try { doc.documentPreferences.allowPageShuffle = true; } catch (e) {}
+
+    // Snapshot of the pages in natural order
+    var pages = doc.pages.everyItem().getElements();
+
+    // Build the print order
+    var order = [];
+    for (var j = 0; j < k; j++) {
+        order.push(pages[j]);   // intro page (front)
+        order.push(null);       // blank back
+    }
+    for (var i = 0; i < half; i++) {
+        order.push(pages[k + i]);           // first half day (front)
+        order.push(pages[k + m - 1 - i]);   // matching second half day (back)
+    }
+
+    // Rearrange
+    for (var n = 0; n < order.length; n++) {
+        if (order[n]) {
+            order[n].move(LocationOptions.AT_END);
+        } else {
+            var np = doc.pages.add(LocationOptions.AT_END);
+            try { np.appliedMaster = NothingEnum.NOTHING; } catch (e) {}
+        }
+    }
+    doc.save();
+
+    var last = doc.pages.length;
+    alert(
+        "Done! " + last + " pages.\nSaved as: " + outFile.name + "\n\n" +
+        "Please check:\n" +
+        "- page " + (2 * k + 1) + " = January opener\n" +
+        "- page " + (2 * k + 2) + " = December 31\n" +
+        "- page " + (2 * k + 3) + " = January 1\n" +
+        "- page " + (2 * k + 4) + " = December 30\n" +
+        "- page " + (last - 1) + " = July opener\n" +
+        "- page " + last + " = July 1");
+})();
